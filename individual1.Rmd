@@ -7,22 +7,154 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(ggplot2)
+defense <- read_excel('cyclonesFootball2018.xlsx', sheet='Defensive')
+str(defense)
+offense <- read_excel('cyclonesFootball2018.xlsx', sheet='Offensive')
+str(offense)
+bio <- read_excel('cyclonesFootball2018.xlsx', sheet='Biography')
+str(bio)
 ```
 
-## Including Plots
+## Cleaning Data
 
-You can also embed plots, for example:
+(@) The player names and opponent names are factors.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+defense$Name <- factor(defense$Name)
+defense$Opponent_Opponent <- factor(defense$Opponent_Opponent)
+
+offense$Name <- factor(offense$Name)
+offense$Opponent_Opponent <- factor(offense$Opponent_Opponent)
+
+bio$Name <- factor(bio$Name)
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+(@) All offensive and defensive statistics are numerical.The Weight column in biogrpahy is also numeric.
+
+```{r}
+defClean <- defense %>% mutate_if(is.character,as.numeric)
+offClean <- offense %>% mutate_if(is.character,as.numeric)
+
+bioClean <- bio
+bioClean$Weight <- as.numeric(bioClean$Weight)
+```
+
+(@) Bonus: Change the Height column in biogrpahy into numeric
+
+```{r}
+bioClean <- bioClean %>% separate(Height, into=c('Feet', 'Inches'))
+bioClean$Feet <- as.numeric(bioClean$Feet)
+bioClean$Inches <- as.numeric(bioClean$Inches)
+bioClean <- bioClean %>% mutate('Height (in Inches)' = Feet*12 + Inches)
+bioClean <- bioClean %>% select(-Feet, -Inches)
+```
+
+Separated the `Height` column into `Feet` and `Inches` in order to introduce `Height (in Inches)` column as a numeric.
+
+```{r}
+str(defClean)
+str(offClean)
+str(bioClean)
+```
+
+
+## Tidy Data
+
+(@) Reformat the defClean data frame into a tidy format using gather. The type of statistic (Tackles_Solo, Tackles_ASST, etc) is added as a new key column named Statistic.
+
+```{r}
+defClean <- defClean %>% gather(key=Statistic, value=val, 3:11)
+```
+
+(@) Create a histogram for each defensive statistic. Use facet_wrap to draw all histograms in a single plot. What defensive skills are rare?
+
+```{r}
+ggplot(defClean, aes(x=val)) + geom_histogram(bins=12) + facet_wrap(~ Statistic) + xlab('Statistic Value') + ggtitle('Histograms of Defensive Statistics')
+```
+ 
+ Turnovers are rare defensive skills (see histograms for `Turnover_FF`, `Turnover_FR`, and `Turnover_INT`). From the histograms we can see that a majority of the time, players will perform 0 of each of these skills per game. Defensive players rarely perform any kind of Turnover in a game.
+ 
+(@) Did ISU have better defense against West Virginia or Kansas State? Answer this question by creating a scatterplot with x-axis being the number of solo tackles (by each player) against West Virginia, and y-axis being that against Kansas State. A large number of solo tackles indicates good defense.
+
+```{r}
+wv <- defClean %>% filter(Opponent_Opponent=='West Virginia' & Statistic == 'Tackles_Solo')
+ks <- defClean %>% filter(Opponent_Opponent=='Kansas State' & Statistic == 'Tackles_Solo')
+ks <- ks %>% filter(Name != 'White, Lawrence')
+
+plot(wv$val, ks$val, main="Denfense against West Virgina vs Defense against Kansas State",  xlab="# of Solo Tackles against WV", ylab="# of Solo Tackles against KS")
+abline(a=1, b=1)
+```
+
+Lawrence White played in the game against Kansas State, but not in the game against West Virginia, so we need to remove his data in order to create the plot. 
+
+According to the plot, 3 players got the same number of solo tackles in the game against WV as they got in the game against KS (see the points on the line x=1, y=1). The points above the line represent players who got more solo tackles in the game against KS than in the game against WV. Similarly, the points below the line represent players who got more solo tackles in the game against WV than in the game against KS. There are 5 players who got more solo tackles against KS and 5 players who got more solo tackles against WV. From this data only, it would appear ISU's defense was the same against WV as it was against KS, however we need to consider the total number of solo tackles by all players in each game.
+
+``` {r}
+WVsoloTackles <- sum(wv$val)
+KSsoloTackles <- sum(ks$val)
+WVsoloTackles
+KSsoloTackles
+```
+
+In total, ISU got 43 solo tackles against KS and 25 against WV. From this data, it appears ISU had a better defense against Kansas State than they did against West Virginia.
+
+(@) Separate the Hometown column into two columns, namely the city and the state. Print the first few rows of these two columns. (Hint: look at the sep= argument of separate)
+
+```{r}
+bioClean <- bioClean %>% separate(Hometown, into=c('City', 'State'), sep=", ")
+bioClean %>% select(City, State) %>% head()
+```
+
+(@) How many players are there from each state?
+
+```{r}
+bioClean$State <- factor(bioClean$State)
+table(bioClean$State)
+```
+NOTE: Australia and Nigeria are not states, but are included because players from outside the U.S. have a country, rather than a state, associated with their hometown.
+
+## Joining Data Frames
+
+(@) Find where do the offensive players come from by joining the offensive data and player biography data appropriately.
+
+```{r}
+offBio <- semi_join(bioClean, offClean)
+table(offBio$State)
+```
+
+3 offensive players are from Ohio and 2 are from Florida. There is 1 offensive player from each of the folllowing states: Arizona, Arkansas, Iowa, Maryland, Missouri, Oklahoma, Texas, Virginia, and Wisconsin.
+
+(@) Is there a relationship between the weight of a player and the receiving yards (Receiving_YDS)?
+
+```{r}
+weightYDS <- inner_join(offClean, bioClean)
+ggplot(weightYDS, aes(x=Weight, y=Receiving_YDS)) + geom_point() +   stat_smooth(method = "lm", col = "red") + ggtitle("Weight vs Receiving Yards")
+```
+
+First create a scatterplot of `Weight` by `Receiving_YDS`, then plot the linear regression line between the two variables. From this plot, there does not appear to be a relationship between `Weight` and `Receiving_YDS`, as the linear regression line is nearly horizontal and the points are not clustered along the line.
+
+(@) Explore more. Raise a question that can be answered only by looking at two or more data frames. Then answer that question.
+
+**Are more offensive players from Iowa or more defensive players from Iowa?**
+
+```{r}
+table(offBio$State)
+defBio <- semi_join(bioClean, defClean)
+table(defBio$State)
+```
+
+11 defensive players are from Iowa whereas only 1 offensive player is from Iowa. Compare the total number of defensive players to the total number of offensive players to determine percentage of players from Iowa.
+
+``` {r}
+length(offBio$Name)
+length(defBio$Name)
+```
+
+1 of the 14 offensive players is from Iowa and 11 of the 42 defensive players are from Iowa. This means about 7% of offensive players are from Iowa, whereas about 26% of defensive players are from Iowa. Therefore, more defensive players are from Iowa than offensive players.
